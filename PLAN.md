@@ -7,90 +7,107 @@ Définir l'ensemble des tests nécessaires pour valider :
 - La **bonne interaction** entre le `Triangulator` et le `PointSetManager`.
 - La **robustesse**, la **performance** et la **qualité** du code produit.
 
-Nous adoptons une démarche **Test-Driven Development (TDD)** autant que possible : rédaction des tests avant l’implémentation.
+Nous adoptons une démarche **Test-Driven Development (TDD)** : les tests guident l’implémentation.
 
 
 ## 2. Stratégie générale
 
-Nous suivrons les niveaux de test suivants:
-
-| Niveau | Description | Boîte | Outils | Objectif |
-|-------|-------------|------|--------|----------|
-| Tests unitaires | Algorithme de triangulation et conversion binaire ↔ structures internes | Boîte blanche | `pytest` | Vérifier la justesse computationnelle |
-| Tests d’intégration | Communication avec PointSetManager (mocké) | Boîte grise | `unittest.mock` | Vérifier les interactions |
-| Tests API (end-to-end) | Appels HTTP sur le serveur Flask | Boîte noire | `pytest` + client Flask | Vérifier le comportement global |
-| Tests de performance | Mesure du temps de triangulation & conversions | — | `pytest` (marqué) | Mesurer temps / coûts mémoire |
+| Niveau | Description | Pourquoi ? | Comment ? | Outils | Type |
+|-------|-------------|------------|-----------|--------|------|
+| Tests unitaires | Tests de l’algorithme et de la conversion binaire | Garantir la justesse interne du traitement | Tester directement les fonctions internes avec des jeux de données connus | `pytest` | Boîte blanche |
+| Tests d’intégration | Interaction Triangulator ↔ PointSetManager | Valider le dialogue entre services | Utilisation de **mocks** pour simuler l’API externe | `unittest.mock`, `pytest` | Boîte grise |
+| Tests API (end-to-end) | Tests HTTP complets sur Flask | Vérifier le comportement réel du service | Utilisation du `test_client` Flask pour envoyer des requêtes | `pytest` + Flask client | Boîte noire |
+| Tests de performance | Mesure temps / mémoire | Assurer que la triangulation reste utilisable à grande échelle | Génération de grands ensembles + mesure d’exécution | `pytest` (marquage) | — |
 
 
 ## 3. Jeux de données (partitions d’équivalence)
 
-### Pour les `PointSet` :
+Ces jeux sont définis pour s’assurer que **chaque type de cas possible** est couvert.
 
-| Cas | Description | Exemple |
-|-----|-------------|---------|
-| P0 | Ensemble vide | 0 point |
-| P1 | 1 seul point | trivial |
-| P2 | 2 points | pas de triangle possible |
-| P3 | 3 points formant un triangle simple | cas nominal minimal |
-| Pn | Plusieurs points aléatoires | tests réalistes |
-| P_colinéaires | Tous les points sur une droite | doit renvoyer aucun triangle |
-| P_dupliqués | Points identiques répétés | doit être géré proprement |
+| Cas | Pourquoi ? | Exemple | Attendu |
+|-----|------------|---------|---------|
+| P0 | Vérifier gestion du vide | `[]` | Aucun triangle |
+| P1 | Cas limite trivial | `[1 point]` | Aucun triangle |
+| P2 | Segments | 2 points | Aucun triangle |
+| P3 | Cas minimal formant un triangle | 3 points non colinéaires | 1 triangle correct |
+| Pn | Cas réaliste | 10+ points | Plusieurs triangles cohérents |
+| P_colinéaires | Gestion des entrées dégénérées | points alignés | 0 triangle |
+| P_dupliqués | Robustesse aux doublons | points répétés | Doit ignorer ou traiter correctement |
 
 
 ## 4. Tests unitaires (niveau composant)
 
-### 4.1. Conversion binaire → structure interne (`parse_point_set`)
-- Lecture du nombre de points
-- Conversion float correcte
-- Gestion des cas limites (P0, P_colinéaires, P_dupliqués, données invalides)
+### Pourquoi ?
+Ces tests assurent la validité du cœur logique du service, indépendamment du réseau ou de l’API externe.
 
-### 4.2. Conversion structure interne → représentation `Triangles`
-- Vérifier :
-  - Nombre de sommets identique à l’entrée
-  - Indices des sommets corrects
-  - Ordre des triangles cohérent ou stable
+### Comment ?
+- On crée des données binaires artificielles
+- On les passe aux fonctions internes
+- On compare avec les résultats attendus
+
+### 4.1. `parse_point_set`
+- Lecture correcte du nombre de points
+- Conversion correcte `float ↔ binaire`
+- Tests sur données invalides (bytes mal formés)
+
+### 4.2. Génération de la structure `Triangles`
+- Vérification du respect du format binaire attendu
+- Correspondance correcte indices → sommets
 
 ### 4.3. Algorithme de triangulation
-- Au minimum : Triangulation naïve (ex. Delaunay simplifiée ou ear-clipping)
-- Tests attendus :
-  - `3` points → 1 triangle
-  - Points colinéaires → 0 triangle
-  - Carré → 2 triangles
+Cas testés :
+| Entrée | Attendu |
+|--------|---------|
+| 3 points | 1 triangle |
+| 4 points formant un carré | 2 triangles |
+| Points colinéaires | 0 triangle |
 
 
 ## 5. Tests d’intégration (avec mocks)
 
-Comme le `Triangulator` dépend du `PointSetManager`, nous utiliserons des **mocks**.
+### Pourquoi ?
+Le `Triangulator` ne stocke rien : il **dépend** du `PointSetManager`.  
+On doit donc vérifier l’interaction sans dépendre d’un vrai réseau.
 
-| Test | Description | Mock attendu |
-|------|-------------|--------------|
-| Récupération OK | GET /pointset/{id} renvoie un set | Stub renvoyant un PointSet valide |
-| PointSet inexistant | 404 renvoyé par PSM | Triangulator doit renvoyer 404 |
-| Erreur réseau | Timeout simulé | Triangulator doit renvoyer 503 |
+### Comment ?
+- Utilisation de `unittest.mock.Mock` pour simuler les réponses HTTP du PSM.
+- Les tests vérifient :
+  - Réponses correctes selon le statut du PSM.
+  - Gestion des erreurs réseau.
+
+| Test | Scénario simulé | Attendu |
+|------|-----------------|---------|
+| Récupération OK | Le PSM renvoie un set valide | Triangulateur renvoie Triangles |
+| ID inconnu | PSM renvoie 404 | Triangulateur renvoie 404 |
+| Timeout | PSM ne répond pas | Triangulateur renvoie 503 |
 
 
 ## 6. Tests API (end-to-end Flask)
 
-Utilisation du client Flask (`app.test_client()`).
+### Pourquoi ?
+Pour s'assurer que le service complet fonctionne **tel qu’un client l’utiliserait**.
+
+### Comment ?
+- Démarrer l'application Flask en mode test
+- Appeler les endpoints en binaire via `test_client`
 
 | Endpoint | Cas testés | Résultat attendu |
 |---------|------------|----------------|
-| POST /triangulate | PointSet valide | Retourne `Triangles` binaires |
-| POST /triangulate | ID inconnu | 404 |
-| POST /triangulate | Format binaire invalide | 400 |
+| POST /triangulate | ID valide | Response 200 + Triangles binaires |
+| POST /triangulate | ID inconnu | Response 404 |
+| POST /triangulate | Format binaire invalide | Response 400 |
 
 
 ## 7. Tests de performance
 
-### Objectifs
-- Mesurer les temps d’exécution pour différentes tailles d’ensembles :
-  - 100 points
-  - 1 000 points
-  - 10 000 points
-- Mesurer le coût CPU/mémoire de la conversion binaire
+### Pourquoi ?
+La triangulation peut être coûteuse → il faut garantir un temps raisonnable.
 
-### Mise en place
-- Tests marqués `@pytest.mark.performance`
-- Exclu des tests standards → exécutable avec :  
-  ```bash
-  make perf_test
+### Comment ?
+- Génération automatique d’ensembles de tailles croissantes
+- Mesure du temps via `time.perf_counter()`
+- Tests marqués `@pytest.mark.performance` pour exclusion du run normal
+
+Exécution :
+```bash
+make perf_test
