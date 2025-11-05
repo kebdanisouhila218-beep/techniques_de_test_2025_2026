@@ -12,7 +12,7 @@ Nous adoptons une démarche **Test-Driven Development (TDD)** autant que possibl
 
 ## 2. Stratégie générale
 
-Nous suivrons les niveaux de test suivants :
+Nous suivrons les niveaux de test suivants:
 
 | Niveau | Description | Boîte | Outils | Objectif |
 |-------|-------------|------|--------|----------|
