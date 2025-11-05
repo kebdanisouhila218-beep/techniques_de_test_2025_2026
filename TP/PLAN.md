@@ -104,7 +104,7 @@ Pour s'assurer que le service complet fonctionne **tel qu’un client l’utilis
 La triangulation peut être coûteuse → il faut garantir un temps raisonnable.
 
 ### Comment ?
-- Génération automatique d’ensembles de tailles croissantes
+- Génération automatique d’ ensembles de tailles croissantes
 - Mesure du temps via `time.perf_counter()`
 - Tests marqués `@pytest.mark.performance` pour exclusion du run normal
 
